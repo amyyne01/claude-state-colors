@@ -10,9 +10,9 @@ A Claude Code mod that puts a **colored live band above your prompt**, so you ca
 
 | Part | What it shows |
 | --- | --- |
-| **State badge** | A filled color pill: ready, thinking, running (with the tool name), done, stopped or error. |
-| **Timer and tool count** | Seconds and number of tool calls for the current or last turn. |
-| **Agent tree** | One block per live subagent: a status pill (running, waiting, idle, failed), its name (`#1`, `#2` when several share one), its one-line thinking and its last tool calls, colored by kind. Up to three are shown and `+N more` counts the rest. |
+| **State badge** | Above the prompt: a filled color pill for ready, thinking, running (with the tool name), done, stopped or error. |
+| **Timer, tool count, agent count** | Seconds and tool calls for the current or last turn, and how many subagents are live. |
+| **Agent rows** | Under the prompt, in Claude Code's own agent list: one block per live subagent with a status pill (running, waiting, idle, failed), its name (`#1`, `#2` when several share one), its one-line thinking and its last tool calls, colored by kind. |
 | **Tool row bar** | A colored `▎` at the left of every tool call in the transcript. |
 | **Long-turn toast** | A toast such as `✓ done after 47s` when a turn takes 30 s or more. |
 
@@ -39,7 +39,8 @@ Answer `y` to add the marketplace, then pick a scope. The mod is active in that 
 It is a single hooks module (`hooks/register.tsx`) with no dependencies:
 
 - `turn.start`, `tool.call` and `turn.complete` keep the current state in `$.state`.
-- A `ui.render` hook on `AbovePrompt` draws the badge and the agents row from that state.
+- A `ui.render` hook on `AbovePrompt` draws the badge row from that state.
+- A `ui.render` hook on `AgentRow` replaces the body of each subagent's row in the agent list under the prompt.
 - A `ui.render` hook on `ToolUse` adds the colored bar to each tool row.
 - A `turn.step` stream hook reads each subagent's thinking, and `$.agent.list()` supplies the chips. Both are buffered and flushed once a second so streaming never redraws on every token.
 
@@ -59,7 +60,8 @@ Colors are the terminal's named colors (`green`, `magenta`, `cyan`, ...), so the
 - **Tool bar is one character.** The terminal's `Box` has no left-only border, so on multi-line tool output only the first line carries the bar.
 - **No colored status line.** The engine draws a mod's status line in plain warning style, so the colors live in the band instead.
 - **Subagents only.** Background shell tasks are not tracked, because the API lists agents, not shell jobs.
-- **Main badge is the main loop.** Subagents have their own blocks and never change the badge, timer or tool count.
+- **Main badge is the main loop.** Subagents have their own rows and never change the badge, timer or tool count.
+- **The `● main` row is the engine's.** A mod can restyle subagent rows but not the main one.
 
 ## Test
 

@@ -105,85 +105,62 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // State stays above the prompt: the badge, timer, tool count and a one-word agent summary.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const W = Math.max(40, e.props.bodyColumns)
     const s = await read($, live)
     const l = LOOK[s.phase]
-    const tr = await read($, trace)
     const all = (await read($, agents)).filter(a => a.status !== 'completed' && a.status !== 'killed')
-    const shown = all.slice(0, 3)
-    const hidden = all.length - shown.length
     const stats = s.startedAt === 0 ? '' : `${s.seconds > 0 ? `${s.seconds}s  ` : ''}${s.tools} tool${s.tools === 1 ? '' : 's'}`
-    const running = all.filter(a => a.status === 'running').length
-    const waiting = all.filter(a => a.status === 'waiting').length
 
-    // Same-type agents get #1, #2 so they stay apart.
-    const names = shown.map((a, i) => {
-      const base = a.description !== '' ? a.description : a.type
-      const same = all.filter(o => (o.description !== '' ? o.description : o.type) === base)
-      return cut(same.length > 1 ? `${base} #${same.indexOf(a) + 1}` : base, 28)
-    })
+    return (
+      <Box>
+        <Text backgroundColor={l.bg} color="black">{` ${l.icon} ${l.label} `}</Text>
+        {s.detail !== '' && <Text color={l.bg}>{`  ${s.detail}`}</Text>}
+        {stats !== '' && <Text color={l.bg} dimColor>{`  ${stats}`}</Text>}
+        {all.length > 0 && <Text color="magenta" dimColor>{`  ⚑ ${all.length} agent${all.length === 1 ? '' : 's'}`}</Text>}
+      </Box>
+    )
+  })
+
+  // Each subagent's block lives in the engine's own agent list under the prompt, in place of its row body.
+  on('ui.render', { component: 'AgentRow' }, async ($, e, next) => {
+    const { Box, Text } = $.ui.resolve(e)
+    const a = e.props
+    const W = Math.max(30, a.columns ?? 80)
+    const t = (await read($, trace))[a.id]
+    const list = await read($, agents)
+    const base = a.description !== '' ? a.description : a.type
+    const same = list.filter(o => (o.description !== '' ? o.description : o.type) === base)
+    const name = cut(same.length > 1 ? `${base} #${same.findIndex(o => o.id === a.id) + 1}` : base, 28)
+    const color = AGENT_COLOR[a.status] ?? 'white'
+    const budget = W - 6
+    const tools: string[] = []
+    let used = 0
+    for (const x of t?.tools ?? []) {
+      const seg = `▎${cut(x, 24)}`
+      if (used + seg.length + 2 > budget) break
+      tools.push(seg)
+      used += seg.length + 2
+    }
 
     return (
       <Box flexDirection="column">
         <Box>
-          <Text backgroundColor={l.bg} color="black">{` ${l.icon} ${l.label} `}</Text>
-          {s.detail !== '' && <Text color={l.bg}>{`  ${s.detail}`}</Text>}
-          {stats !== '' && <Text color={l.bg} dimColor>{`  ${stats}`}</Text>}
+          <Text backgroundColor={color} color="black">{` ${a.status} `}</Text>
+          <Text bold>{` ${name}`}</Text>
+          {a.description !== '' && <Text dimColor>{`  ${cut(a.type, 18)}`}</Text>}
         </Box>
-        {all.length > 0 && (
-          <Box>
-            <Text color="magenta" bold>{'⚑ AGENTS '}</Text>
-            <Text color="magenta" dimColor>
-              {[running > 0 ? `${running} running` : '', waiting > 0 ? `${waiting} waiting` : ''].filter(x => x !== '').join(' · ') || `${all.length} idle`}
-            </Text>
-          </Box>
+        {t !== undefined && t.thought !== '' && (
+          <Text dimColor>{`  ◇ ${t.thought.length > budget ? `…${t.thought.slice(-(budget - 1))}` : t.thought}`}</Text>
         )}
-        {shown.map((a, i) => {
-          const t = tr[a.id]
-          const isLast = i === shown.length - 1 && hidden === 0
-          const branch = isLast ? '└' : '├'
-          const rail = isLast ? ' ' : '│'
-          const color = AGENT_COLOR[a.status] ?? 'white'
-          const budget = W - 8
-          const tools: string[] = []
-          let used = 0
-          for (const x of t?.tools ?? []) {
-            const seg = `▎${cut(x, 24)}`
-            if (used + seg.length + 2 > budget) break
-            tools.push(seg)
-            used += seg.length + 2
-          }
-          return (
-            <Box key={`a${a.id}`} flexDirection="column">
-              <Box>
-                <Text color="magenta" dimColor>{`${branch} `}</Text>
-                <Text backgroundColor={color} color="black">{` ${a.status} `}</Text>
-                <Text bold>{` ${names[i]}`}</Text>
-                {a.description !== '' && <Text dimColor>{`  ${cut(a.type, 18)}`}</Text>}
-              </Box>
-              {t !== undefined && t.thought !== '' && (
-                <Box>
-                  <Text color="magenta" dimColor>{`${rail}   ◇ `}</Text>
-                  <Text dimColor>{t.thought.length > budget ? `…${t.thought.slice(-(budget - 1))}` : t.thought}</Text>
-                </Box>
-              )}
-              {tools.length > 0 && (
-                <Box>
-                  <Text color="magenta" dimColor>{`${rail}   `}</Text>
-                  {tools.map((x, k) => (
-                    <Text key={`k${k}`} color={TOOL_COLOR(x.slice(1).split(' ')[0] ?? '')}>{`${x}  `}</Text>
-                  ))}
-                </Box>
-              )}
-            </Box>
-          )
-        })}
-        {hidden > 0 && (
+        {tools.length > 0 && (
           <Box>
-            <Text color="magenta" dimColor>{`└ +${hidden} more agent${hidden === 1 ? '' : 's'}`}</Text>
+            <Text>{'  '}</Text>
+            {tools.map((x, k) => (
+              <Text key={`k${k}`} color={TOOL_COLOR(x.slice(1).split(' ')[0] ?? '')}>{`${x}  `}</Text>
+            ))}
           </Box>
         )}
       </Box>

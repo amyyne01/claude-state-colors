@@ -27,3 +27,28 @@ test('a subagent loop does not change the main badge', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /RUNNING|THINKING/ })).toBeFalsy()
   await ui.unmount()
 })
+
+test('a subagent row shows its status and name', async ($, on) => {
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const ui = await $.ui.mount({
+    plugin: 'state-colors',
+    component: 'AgentRow',
+    surface: 'terminal',
+    requestId: 'sub-1',
+    props: {
+      id: 'sub-1',
+      description: 'Fix baseline',
+      type: 'general-purpose',
+      status: 'running',
+      hasRow: true,
+      rowIds: ['sub-1'],
+      isHidden: false,
+    },
+  } as never)
+
+  expect(await ui.find({ type: 'Text', text: /running/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /Fix baseline/ })).toBeTruthy()
+  await ui.unmount()
+})
