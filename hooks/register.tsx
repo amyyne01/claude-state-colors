@@ -10,6 +10,11 @@ const live = atom(
 
 const agents = atom({ plugin: 'state-colors', key: 'agents' } as const, [] as Chip[])
 
+const IDLE: Live = { phase: 'idle', detail: '', startedAt: 0, seconds: 0, tools: 0 }
+// Badge state of every subagent, so the band can show the one being viewed.
+const lives = atom({ plugin: 'state-colors', key: 'lives' } as const, {} as Record<string, Live>)
+const inflightA: Record<string, number> = {}
+
 const trace = atom({ plugin: 'state-colors', key: 'trace' } as const, {} as Record<string, Trace>)
 
 // Live per-agent buffer, flushed to the atom once a second so streaming doesn't redraw on every token.
@@ -52,6 +57,9 @@ export const register: Register = on => {
       for (const id of Object.keys(buf)) if (!now.some(a => a.id === id)) delete buf[id]
       const snap: Record<string, Trace> = JSON.parse(JSON.stringify(buf))
       if (JSON.stringify(await read($, trace)) !== JSON.stringify(snap)) await update($, trace, () => snap)
+      const lv = await read($, lives)
+      const keep = Object.entries(lv).filter(([id]) => now.some(a => a.id === id))
+      if (keep.length !== Object.keys(lv).length) await update($, lives, () => Object.fromEntries(keep))
       $.ui.status(undefined)
     })
     return next(e)
@@ -71,7 +79,13 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
-    if (e.agentId !== undefined) return next(e)
+    if (e.agentId !== undefined) {
+      const id = e.agentId
+      inflightA[id] = 0
+      const t0 = await $.clock.now()
+      await update($, lives, m => ({ ...m, [id]: { phase: 'thinking' as Phase, detail: '', startedAt: t0, seconds: 0, tools: 0 } }))
+      return next(e)
+    }
     inflight = 0
     const now = await $.clock.now()
     await update($, live, () => ({ phase: 'thinking' as Phase, detail: '', startedAt: now, seconds: 0, tools: 0 }))
@@ -82,7 +96,18 @@ export const register: Register = on => {
     if (e.agentId !== undefined) {
       const t = slot(e.agentId)
       t.tools = [...t.tools, `${e.tool} ${arg(e as unknown as Record<string, unknown>)}`].slice(-3)
-      return next(e)
+      const id = e.agentId
+      inflightA[id] = (inflightA[id] ?? 0) + 1
+      await update($, lives, m => {
+        const p = m[id] ?? IDLE
+        return { ...m, [id]: { ...p, phase: 'tool' as Phase, detail: e.tool, tools: p.tools + 1 } }
+      })
+      const ran = await next(e)
+      inflightA[id] = Math.max(0, (inflightA[id] ?? 1) - 1)
+      const isOk = ran.deny === undefined && ran.isError !== true
+      const phase: Phase = (inflightA[id] ?? 0) > 0 ? 'tool' : isOk ? 'thinking' : 'error'
+      await update($, lives, m => ({ ...m, [id]: { ...(m[id] ?? IDLE), phase } }))
+      return ran
     }
     inflight += 1
     await update($, live, s => ({ ...s, phase: 'tool' as Phase, detail: e.tool, tools: s.tools + 1 }))
@@ -95,7 +120,17 @@ export const register: Register = on => {
   }).catch((_$, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId !== undefined) return next(e)
+    if (e.agentId !== undefined) {
+      const id = e.agentId
+      inflightA[id] = 0
+      const t1 = await $.clock.now()
+      const phase: Phase = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'aborted' : 'error'
+      await update($, lives, m => {
+        const p = m[id] ?? IDLE
+        return { ...m, [id]: { ...p, phase, detail: '', seconds: Math.round((t1 - p.startedAt) / 1000) } }
+      })
+      return next(e)
+    }
     inflight = 0
     const now = await $.clock.now()
     const phase: Phase = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'aborted' : 'error'
@@ -109,16 +144,22 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const s = await read($, live)
+    // The band follows the view: main's state, or the subagent the person switched to.
+    const vid = e.props.view.agentId
+    const lv = await read($, lives)
+    const s = vid === undefined ? await read($, live) : (lv[vid] ?? IDLE)
     const l = LOOK[s.phase]
+    const viewed = vid === undefined ? undefined : (await read($, agents)).find(a => a.id === vid)
+    const viewedName = viewed === undefined ? '' : cut(viewed.description !== '' ? viewed.description : viewed.type, 28)
     const all = (await read($, agents)).filter(a => a.status !== 'completed' && a.status !== 'killed')
-    const stats = s.startedAt === 0 ? '' : `${s.seconds > 0 ? `${s.seconds}s  ` : ''}${s.tools} tool${s.tools === 1 ? '' : 's'}`
+    const stats = s.startedAt === 0 && s.tools === 0 ? '' : `${s.seconds > 0 ? `${s.seconds}s  ` : ''}${s.tools} tool${s.tools === 1 ? '' : 's'}`
 
     return (
       <Box>
         <Text backgroundColor={l.bg} color="black">{` ${l.icon} ${l.label} `}</Text>
         {s.detail !== '' && <Text color={l.bg}>{`  ${s.detail}`}</Text>}
         {stats !== '' && <Text color={l.bg} dimColor>{`  ${stats}`}</Text>}
+        {vid !== undefined && <Text color="magenta" bold>{`  ◇ ${viewedName !== '' ? viewedName : 'agent'}`}</Text>}
         {all.length > 0 && <Text color="magenta" dimColor>{`  ⚑ ${all.length} agent${all.length === 1 ? '' : 's'}`}</Text>}
       </Box>
     )

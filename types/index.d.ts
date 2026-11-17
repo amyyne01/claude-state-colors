@@ -5,6 +5,6 @@ export type Trace = { thought: string; tools: string[] }
 
 declare module 'claude-code' {
   interface PluginState {
-    'state-colors': { live: Live; agents: Chip[]; trace: Record<string, Trace> }
+    'state-colors': { live: Live; lives: Record<string, Live>; agents: Chip[]; trace: Record<string, Trace> }
   }
 }

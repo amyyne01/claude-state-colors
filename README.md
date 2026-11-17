@@ -2,7 +2,7 @@
 
 A Claude Code mod that puts a **colored live band above your prompt**, so you can see at a glance what Claude is doing, what its subagents are thinking, and which tools they are running.
 
-![The band cycling through ready, thinking, running with a live subagent, and done](assets/demo.svg)
+![A 16-second loop: the badge goes ready, thinking, running; two subagents appear in the agent list with their thinking and tool calls; a toast says done](assets/demo.svg)
 
 > The images here are drawn mock-ups of the real terminal UI, not captures of a live session.
 
@@ -11,6 +11,7 @@ A Claude Code mod that puts a **colored live band above your prompt**, so you ca
 | Part | What it shows |
 | --- | --- |
 | **State badge** | Above the prompt: a filled color pill for ready, thinking, running (with the tool name), done, stopped or error. |
+| **Follows your view** | Switch to a subagent in the agent list and the badge, timer and tool count become that agent's (its name appears beside them). Switch back to main and they return to the main loop's. |
 | **Timer, tool count, agent count** | Seconds and tool calls for the current or last turn, and how many subagents are live. |
 | **Agent rows** | Under the prompt, in Claude Code's own agent list: one block per live subagent with a status pill (running, waiting, idle, failed), its name (`#1`, `#2` when several share one), its one-line thinking and its last tool calls, colored by kind. |
 | **Tool row bar** | A colored `▎` at the left of every tool call in the transcript. |
@@ -60,7 +61,7 @@ Colors are the terminal's named colors (`green`, `magenta`, `cyan`, ...), so the
 - **Tool bar is one character.** The terminal's `Box` has no left-only border, so on multi-line tool output only the first line carries the bar.
 - **No colored status line.** The engine draws a mod's status line in plain warning style, so the colors live in the band instead.
 - **Subagents only.** Background shell tasks are not tracked, because the API lists agents, not shell jobs.
-- **Main badge is the main loop.** Subagents have their own rows and never change the badge, timer or tool count.
+- **Each loop keeps its own state.** A subagent never changes the main badge; the badge shows whichever loop you are viewing.
 - **The `● main` row is the engine's.** A mod can restyle subagent rows but not the main one.
 
 ## Test

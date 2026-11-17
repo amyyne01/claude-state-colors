@@ -1,6 +1,6 @@
 {
   "name": "state-colors",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A colored live band above the Claude Code prompt: state badge, timer, tool count, subagent thinking and a colored tool trail.",
   "author": { "name": "amyyne01" },
   "license": "MIT",
