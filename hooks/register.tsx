@@ -18,6 +18,10 @@ const slot = (id: string): Trace => (buf[id] ??= { thought: '', tools: [] })
 const one = (t: string, n: number): string => t.replace(/\s+/g, ' ').trim().slice(-n)
 const arg = (e: Record<string, unknown>): string => one(String(e.command ?? e.file_path ?? e.pattern ?? e.path ?? e.description ?? e.prompt ?? ''), 36)
 
+// Main-loop tool calls still running (parallel calls finish out of order).
+let inflight = 0
+const cut = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t)
+
 const AGENT_COLOR: Record<string, string> = { running: 'magenta', waiting: 'yellow', idle: 'blue', pending: 'cyan', failed: 'red', killed: 'red', completed: 'green' }
 
 // Badge colour per state; label text is black on a filled background so it reads on any theme.
@@ -45,6 +49,7 @@ export const register: Register = on => {
     $.clock.every(1000, async () => {
       const now: Chip[] = (await $.agent.list()).map(a => ({ id: a.id, type: a.type, description: a.description, status: a.status }))
       if (JSON.stringify(await read($, agents)) !== JSON.stringify(now)) await update($, agents, () => now)
+      for (const id of Object.keys(buf)) if (!now.some(a => a.id === id)) delete buf[id]
       const snap: Record<string, Trace> = JSON.parse(JSON.stringify(buf))
       if (JSON.stringify(await read($, trace)) !== JSON.stringify(snap)) await update($, trace, () => snap)
       $.ui.status(undefined)
@@ -66,6 +71,8 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+    inflight = 0
     const now = await $.clock.now()
     await update($, live, () => ({ phase: 'thinking' as Phase, detail: '', startedAt: now, seconds: 0, tools: 0 }))
     return next(e)
@@ -75,15 +82,21 @@ export const register: Register = on => {
     if (e.agentId !== undefined) {
       const t = slot(e.agentId)
       t.tools = [...t.tools, `${e.tool} ${arg(e as unknown as Record<string, unknown>)}`].slice(-3)
+      return next(e)
     }
+    inflight += 1
     await update($, live, s => ({ ...s, phase: 'tool' as Phase, detail: e.tool, tools: s.tools + 1 }))
     const ran = await next(e)
-    const phase: Phase = ran.deny === undefined && ran.isError !== true ? 'thinking' : 'error'
+    inflight = Math.max(0, inflight - 1)
+    const isOk = ran.deny === undefined && ran.isError !== true
+    const phase: Phase = inflight > 0 ? 'tool' : isOk ? 'thinking' : 'error'
     await update($, live, s => ({ ...s, phase }))
     return ran
   }).catch((_$, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+    inflight = 0
     const now = await $.clock.now()
     const phase: Phase = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'aborted' : 'error'
     await update($, live, s => ({ ...s, phase, detail: '', seconds: Math.round((now - s.startedAt) / 1000) }))
@@ -95,11 +108,23 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const { Box, Text } = $.ui.resolve(e)
+    const W = Math.max(40, e.props.bodyColumns)
     const s = await read($, live)
     const l = LOOK[s.phase]
     const tr = await read($, trace)
-    const live2 = (await read($, agents)).filter(a => a.status !== 'completed' && a.status !== 'killed')
+    const all = (await read($, agents)).filter(a => a.status !== 'completed' && a.status !== 'killed')
+    const shown = all.slice(0, 3)
+    const hidden = all.length - shown.length
     const stats = s.startedAt === 0 ? '' : `${s.seconds > 0 ? `${s.seconds}s  ` : ''}${s.tools} tool${s.tools === 1 ? '' : 's'}`
+    const running = all.filter(a => a.status === 'running').length
+    const waiting = all.filter(a => a.status === 'waiting').length
+
+    // Same-type agents get #1, #2 so they stay apart.
+    const names = shown.map((a, i) => {
+      const base = a.description !== '' ? a.description : a.type
+      const same = all.filter(o => (o.description !== '' ? o.description : o.type) === base)
+      return cut(same.length > 1 ? `${base} #${same.indexOf(a) + 1}` : base, 28)
+    })
 
     return (
       <Box flexDirection="column">
@@ -108,29 +133,59 @@ export const register: Register = on => {
           {s.detail !== '' && <Text color={l.bg}>{`  ${s.detail}`}</Text>}
           {stats !== '' && <Text color={l.bg} dimColor>{`  ${stats}`}</Text>}
         </Box>
-        {live2.length > 0 && (
+        {all.length > 0 && (
           <Box>
-            <Text color="magenta">{'⚑ agents '}</Text>
-            {live2.slice(0, 4).map(a => (
-              <Text key={a.id} color={AGENT_COLOR[a.status] ?? 'white'}>{`${a.type}:${a.status}  `}</Text>
-            ))}
-            {live2.length > 4 && <Text dimColor>{`+${live2.length - 4}`}</Text>}
+            <Text color="magenta" bold>{'⚑ AGENTS '}</Text>
+            <Text color="magenta" dimColor>
+              {[running > 0 ? `${running} running` : '', waiting > 0 ? `${waiting} waiting` : ''].filter(x => x !== '').join(' · ') || `${all.length} idle`}
+            </Text>
           </Box>
         )}
-        {live2.slice(0, 3).map(a => {
+        {shown.map((a, i) => {
           const t = tr[a.id]
-          if (t === undefined) return null
+          const isLast = i === shown.length - 1 && hidden === 0
+          const branch = isLast ? '└' : '├'
+          const rail = isLast ? ' ' : '│'
+          const color = AGENT_COLOR[a.status] ?? 'white'
+          const budget = W - 8
+          const tools: string[] = []
+          let used = 0
+          for (const x of t?.tools ?? []) {
+            const seg = `▎${cut(x, 24)}`
+            if (used + seg.length + 2 > budget) break
+            tools.push(seg)
+            used += seg.length + 2
+          }
           return (
-            <Box key={`t${a.id}`} flexDirection="column">
-              {t.thought !== '' && <Text color="magenta" dimColor>{`  ◇ ${a.type}: ${t.thought}`}</Text>}
+            <Box key={`a${a.id}`} flexDirection="column">
               <Box>
-                {t.tools.map((x, i) => (
-                  <Text key={`k${i}`} color={TOOL_COLOR(x.split(' ')[0] ?? '')}>{`  ▎${x}`}</Text>
-                ))}
+                <Text color="magenta" dimColor>{`${branch} `}</Text>
+                <Text backgroundColor={color} color="black">{` ${a.status} `}</Text>
+                <Text bold>{` ${names[i]}`}</Text>
+                {a.description !== '' && <Text dimColor>{`  ${cut(a.type, 18)}`}</Text>}
               </Box>
+              {t !== undefined && t.thought !== '' && (
+                <Box>
+                  <Text color="magenta" dimColor>{`${rail}   ◇ `}</Text>
+                  <Text dimColor>{t.thought.length > budget ? `…${t.thought.slice(-(budget - 1))}` : t.thought}</Text>
+                </Box>
+              )}
+              {tools.length > 0 && (
+                <Box>
+                  <Text color="magenta" dimColor>{`${rail}   `}</Text>
+                  {tools.map((x, k) => (
+                    <Text key={`k${k}`} color={TOOL_COLOR(x.slice(1).split(' ')[0] ?? '')}>{`${x}  `}</Text>
+                  ))}
+                </Box>
+              )}
             </Box>
           )
         })}
+        {hidden > 0 && (
+          <Box>
+            <Text color="magenta" dimColor>{`└ +${hidden} more agent${hidden === 1 ? '' : 's'}`}</Text>
+          </Box>
+        )}
       </Box>
     )
   })

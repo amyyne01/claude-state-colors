@@ -12,9 +12,7 @@ A Claude Code mod that puts a **colored live band above your prompt**, so you ca
 | --- | --- |
 | **State badge** | A filled color pill: ready, thinking, running (with the tool name), done, stopped or error. |
 | **Timer and tool count** | Seconds and number of tool calls for the current or last turn. |
-| **Agents row** | One chip per live subagent (`Explore:running`), refreshed every second. |
-| **Agent thinking** | The tail of what each subagent is saying or thinking right now. |
-| **Agent tool trail** | Its last three tool calls, each colored by kind. |
+| **Agent tree** | One block per live subagent: a status pill (running, waiting, idle, failed), its name (`#1`, `#2` when several share one), its one-line thinking and its last tool calls, colored by kind. Up to three are shown and `+N more` counts the rest. |
 | **Tool row bar** | A colored `▎` at the left of every tool call in the transcript. |
 | **Long-turn toast** | A toast such as `✓ done after 47s` when a turn takes 30 s or more. |
 
@@ -61,6 +59,15 @@ Colors are the terminal's named colors (`green`, `magenta`, `cyan`, ...), so the
 - **Tool bar is one character.** The terminal's `Box` has no left-only border, so on multi-line tool output only the first line carries the bar.
 - **No colored status line.** The engine draws a mod's status line in plain warning style, so the colors live in the band instead.
 - **Subagents only.** Background shell tasks are not tracked, because the API lists agents, not shell jobs.
+- **Main badge is the main loop.** Subagents have their own blocks and never change the badge, timer or tool count.
+
+## Test
+
+```
+claude plugin test .
+```
+
+`hooks/state.test.tsx` checks that a subagent's tool call leaves the main badge alone.
 
 ## License
 
