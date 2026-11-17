@@ -1,0 +1,11 @@
+{
+  "name": "claude-state-colors",
+  "owner": { "name": "amyyne01" },
+  "plugins": [
+    {
+      "name": "state-colors",
+      "source": "./",
+      "description": "A colored live band above the Claude Code prompt: state badge, timer, tool count, subagent thinking and a colored tool trail."
+    }
+  ]
+}
