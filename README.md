@@ -2,7 +2,7 @@
 
 A Claude Code mod that puts a **colored live band above your prompt**, so you can see at a glance what Claude is doing, what its subagents are thinking, and which tools they are running.
 
-![A 16-second loop: the badge goes ready, thinking, running; two subagents appear in the agent list with their thinking and tool calls; a toast says done](assets/demo.svg)
+![A 20-second loop: the badge goes ready, thinking, running; two subagents appear in the agent list with their thinking and tool calls; the view switches to one of them and the badge shows its state; back on main a toast says done](assets/demo.svg)
 
 > The images here are drawn mock-ups of the real terminal UI, not captures of a live session.
 
